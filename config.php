@@ -10,8 +10,8 @@ define('ENVIRONMENT', 'development'); // Change to 'production' on live server
 // Database Configuration
 define('DB_HOST', 'localhost');
 define('DB_NAME', 'eventswally');
-define('DB_USER', 'root');
-define('DB_PASS', '');
+define('DB_USER', 'eventswally');
+define('DB_PASS', 'eventswally');
 
 // URL Configuration
 if (ENVIRONMENT === 'production') {
