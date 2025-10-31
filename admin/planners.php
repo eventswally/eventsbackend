@@ -5,10 +5,26 @@ $page_title = 'Event Planners';
 $success = '';
 $error = '';
 
-// Handle Delete
+// Handle Delete Image
+if (isset($_GET['delete_image']) && is_numeric($_GET['delete_image'])) {
+    $image_id = intval($_GET['delete_image']);
+    $planner_id = intval($_GET['planner_id']);
+    try {
+        $pdo->prepare("DELETE FROM planner_images WHERE id = ?")->execute([$image_id]);
+        header('Location: planners.php?edit=' . $planner_id . '&image_deleted=1');
+        exit();
+    } catch (Exception $e) {
+        $error = 'Failed to delete image: ' . $e->getMessage();
+    }
+}
+
+// Handle Delete Planner
 if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
     $id = intval($_GET['delete']);
     try {
+        // Delete associated images first
+        $pdo->prepare("DELETE FROM planner_images WHERE planner_id = ?")->execute([$id]);
+        // Delete planner
         $pdo->prepare("DELETE FROM event_planners WHERE id = ?")->execute([$id]);
         $success = 'Event planner deleted successfully!';
     } catch (Exception $e) {
@@ -31,36 +47,71 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $website = clean($_POST['website']);
     $rating = floatval($_POST['rating']);
     $is_featured = isset($_POST['is_featured']) ? 1 : 0;
+    $video_url = clean($_POST['video_url']);
     $slug = generateSlug($name);
+    
+    // Handle logo upload
+    $logo_url = $edit_planner['logo'] ?? null;
+    if (isset($_FILES['logo']) && $_FILES['logo']['error'] === 0) {
+        $upload_result = uploadImage($_FILES['logo'], 'logos');
+        if ($upload_result['success']) {
+            $logo_url = $upload_result['url'];
+        }
+    }
     
     try {
         if ($id > 0) {
             // Update
             $stmt = $pdo->prepare("UPDATE event_planners SET name=?, slug=?, city_id=?, category_id=?, 
                                    short_description=?, description=?, phone=?, whatsapp=?, email=?, 
-                                   address=?, website=?, rating=?, is_featured=? WHERE id=?");
+                                   address=?, website=?, rating=?, is_featured=?, logo=?, video_url=? WHERE id=?");
             $stmt->execute([$name, $slug, $city_id, $category_id, $short_description, $description, 
-                           $phone, $whatsapp, $email, $address, $website, $rating, $is_featured, $id]);
+                           $phone, $whatsapp, $email, $address, $website, $rating, $is_featured, 
+                           $logo_url, $video_url, $id]);
             $planner_id = $id;
             $success = 'Event planner updated successfully!';
         } else {
             // Insert
             $stmt = $pdo->prepare("INSERT INTO event_planners (name, slug, city_id, category_id, 
                                    short_description, description, phone, whatsapp, email, address, 
-                                   website, rating, is_featured) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)");
+                                   website, rating, is_featured, logo, video_url) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
             $stmt->execute([$name, $slug, $city_id, $category_id, $short_description, $description, 
-                           $phone, $whatsapp, $email, $address, $website, $rating, $is_featured]);
+                           $phone, $whatsapp, $email, $address, $website, $rating, $is_featured, 
+                           $logo_url, $video_url]);
             $planner_id = $pdo->lastInsertId();
             $success = 'Event planner added successfully!';
         }
         
-        // Handle image upload
+        // Handle primary image upload
         if (isset($_FILES['image']) && $_FILES['image']['error'] === 0) {
-            $upload_result = uploadImage($_FILES['image']);
+            $upload_result = uploadImage($_FILES['image'], 'planners');
             if ($upload_result['success']) {
+                // Remove old primary image
+                $pdo->prepare("UPDATE planner_images SET is_primary = 0 WHERE planner_id = ?")->execute([$planner_id]);
                 // Set as primary image
                 $pdo->prepare("INSERT INTO planner_images (planner_id, image_url, is_primary) VALUES (?, ?, 1)")
                     ->execute([$planner_id, $upload_result['url']]);
+            }
+        }
+        
+        // Handle multiple gallery images upload
+        if (isset($_FILES['gallery_images']) && !empty($_FILES['gallery_images']['name'][0])) {
+            $total_images = count($_FILES['gallery_images']['name']);
+            for ($i = 0; $i < $total_images; $i++) {
+                if ($_FILES['gallery_images']['error'][$i] === 0) {
+                    $file = array(
+                        'name' => $_FILES['gallery_images']['name'][$i],
+                        'type' => $_FILES['gallery_images']['type'][$i],
+                        'tmp_name' => $_FILES['gallery_images']['tmp_name'][$i],
+                        'error' => $_FILES['gallery_images']['error'][$i],
+                        'size' => $_FILES['gallery_images']['size'][$i]
+                    );
+                    $upload_result = uploadImage($file, 'gallery');
+                    if ($upload_result['success']) {
+                        $pdo->prepare("INSERT INTO planner_images (planner_id, image_url, is_primary, display_order) VALUES (?, ?, 0, ?)")
+                            ->execute([$planner_id, $upload_result['url'], $i + 1]);
+                    }
+                }
             }
         }
         
@@ -99,6 +150,10 @@ include 'header.php';
 
 <?php if (isset($_GET['success'])): ?>
     <div class="alert alert-success">Operation completed successfully!</div>
+<?php endif; ?>
+
+<?php if (isset($_GET['image_deleted'])): ?>
+    <div class="alert alert-success">Image deleted successfully!</div>
 <?php endif; ?>
 
 <?php if ($success): ?>
@@ -198,17 +253,79 @@ include 'header.php';
                            value="<?= $edit_planner['website'] ?? '' ?>">
                 </div>
                 
-                <div class="col-md-6 mb-3">
-                    <label class="form-label">Primary Image</label>
-                    <input type="file" name="image" class="form-control" accept="image/*">
+                <div class="col-md-12 mb-3">
+                    <hr>
+                    <h5 class="mb-3"><i class="bi bi-card-image"></i> Media & Images</h5>
                 </div>
                 
                 <div class="col-md-6 mb-3">
-                    <div class="form-check mt-4">
+                    <label class="form-label">Vendor Logo</label>
+                    <input type="file" name="logo" class="form-control" accept="image/*">
+                    <small class="text-muted">Recommended: 400x400px, PNG with transparent background</small>
+                    <?php if ($edit_planner && !empty($edit_planner['logo'])): ?>
+                        <div class="mt-2">
+                            <img src="<?= $edit_planner['logo'] ?>" alt="Current Logo" style="max-width: 100px; border: 1px solid #ddd; padding: 5px; border-radius: 8px;">
+                            <small class="d-block text-success">Current logo uploaded</small>
+                        </div>
+                    <?php endif; ?>
+                </div>
+                
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Video URL</label>
+                    <input type="url" name="video_url" class="form-control" 
+                           value="<?= $edit_planner['video_url'] ?? '' ?>"
+                           placeholder="https://www.youtube.com/watch?v=... or direct MP4 URL">
+                    <small class="text-muted">YouTube, Vimeo, or direct video URL</small>
+                </div>
+                
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Primary Image</label>
+                    <input type="file" name="image" class="form-control" accept="image/*">
+                    <small class="text-muted">Main display image (recommended: 1200x800px)</small>
+                </div>
+                
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Gallery Images (Multiple)</label>
+                    <input type="file" name="gallery_images[]" class="form-control" accept="image/*" multiple>
+                    <small class="text-muted">Hold Ctrl/Cmd to select multiple images for gallery</small>
+                </div>
+                
+                <?php if ($edit_planner): ?>
+                    <?php 
+                    $existing_images = $pdo->prepare("SELECT * FROM planner_images WHERE planner_id = ? ORDER BY is_primary DESC, display_order ASC");
+                    $existing_images->execute([$edit_planner['id']]);
+                    $images = $existing_images->fetchAll(PDO::FETCH_ASSOC);
+                    if (count($images) > 0): 
+                    ?>
+                        <div class="col-md-12 mb-3">
+                            <label class="form-label">Current Images</label>
+                            <div class="row">
+                                <?php foreach ($images as $img): ?>
+                                    <div class="col-md-2 mb-2">
+                                        <div style="position: relative;">
+                                            <img src="<?= $img['image_url'] ?>" class="img-thumbnail" alt="Image">
+                                            <?php if ($img['is_primary']): ?>
+                                                <span class="badge bg-primary" style="position: absolute; top: 5px; left: 5px;">Primary</span>
+                                            <?php endif; ?>
+                                            <a href="planners.php?delete_image=<?= $img['id'] ?>&planner_id=<?= $edit_planner['id'] ?>" 
+                                               class="btn btn-sm btn-danger w-100 mt-1"
+                                               onclick="return confirm('Delete this image?')">
+                                                <i class="bi bi-trash"></i>
+                                            </a>
+                                        </div>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                        </div>
+                    <?php endif; ?>
+                <?php endif; ?>
+                
+                <div class="col-md-12 mb-3">
+                    <div class="form-check">
                         <input type="checkbox" name="is_featured" class="form-check-input" id="featured"
                                <?= ($edit_planner && $edit_planner['is_featured']) ? 'checked' : '' ?>>
                         <label class="form-check-label" for="featured">
-                            Mark as Featured
+                            <strong>Mark as Featured</strong> (will appear at top of listings)
                         </label>
                     </div>
                 </div>
