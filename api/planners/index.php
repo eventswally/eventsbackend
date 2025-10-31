@@ -21,7 +21,7 @@ try {
     // Build query
     $query = "SELECT 
                 ep.id, ep.name, ep.slug, ep.short_description, 
-                ep.rating, ep.is_featured, ep.phone, ep.whatsapp,
+                ep.rating, ep.is_featured, ep.phone, ep.whatsapp, ep.logo,
                 c.name as city_name, c.slug as city_slug,
                 cat.name as category_name, cat.slug as category_slug, cat.icon as category_icon,
                 (SELECT image_url FROM planner_images WHERE planner_id = ep.id AND is_primary = 1 LIMIT 1) as primary_image
@@ -77,6 +77,7 @@ try {
             "is_featured" => (bool)$row['is_featured'],
             "phone" => $row['phone'],
             "whatsapp" => $row['whatsapp'],
+            "logo" => $row['logo'],
             "city" => array(
                 "name" => $row['city_name'],
                 "slug" => $row['city_slug']
