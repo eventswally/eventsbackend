@@ -5,7 +5,7 @@
  */
 
 // Environment - Set to 'production' on live server
-define('ENVIRONMENT', 'development'); // Change to 'production' on live server
+define('ENVIRONMENT', 'production'); // CHANGED TO PRODUCTION
 
 // Database Configuration
 define('DB_HOST', 'localhost');
